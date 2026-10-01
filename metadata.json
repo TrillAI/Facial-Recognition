@@ -1,0 +1,6 @@
+{
+  "name": "Lookout - Real-Time Facial Recognition Station",
+  "description": "Integrated video surveillance and facial recognition platform powered by CompreFace inference engine with zero-latency live camera detection, watchlist alerts, and subject enrollment.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

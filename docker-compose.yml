@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------
+  # Lookout Real-Time Surveillance & Monitoring Workstation
+  # -------------------------------------------------------------
+  lookout-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lookout-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # Connects directly to CompreFace API on the internal docker network
+      - COMPREFACE_URL=http://compreface-api:8000
+      - COMPREFACE_API_KEY=00000000-0000-0000-0000-000000000000
+      - COMPREFACE_MODE=upstream_proxy
+      # Persistent PostgreSQL database for storing metadata, face events, and user history
+      - DATABASE_URL=postgres://postgres:postgres@compreface-postgres-db:5432/lookout_db
+    volumes:
+      - lookout-data:/app/data
+    depends_on:
+      compreface-api:
+        condition: service_started
+      compreface-postgres-db:
+        condition: service_healthy
+    networks:
+      - lookout-network
+
+  # -------------------------------------------------------------
+  # Exadel CompreFace: Frontend Reverse Proxy & Management Web UI
+  # -------------------------------------------------------------
+  compreface-fe:
+    image: exadel/compreface-fe:1.2.0
+    container_name: compreface-fe
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    depends_on:
+      - compreface-api
+      - compreface-admin
+    networks:
+      - lookout-network
+
+  # -------------------------------------------------------------
+  # Exadel CompreFace: Admin Management Service
+  # -------------------------------------------------------------
+  compreface-admin:
+    image: exadel/compreface-admin:1.2.0
+    container_name: compreface-admin
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_URL=jdbc:postgresql://compreface-postgres-db:5432/compreface
+      - MAX_FILE_SIZE=50MB
+    depends_on:
+      compreface-postgres-db:
+        condition: service_healthy
+    networks:
+      - lookout-network
+
+  # -------------------------------------------------------------
+  # Exadel CompreFace: Face Recognition & Detection REST API
+  # -------------------------------------------------------------
+  compreface-api:
+    image: exadel/compreface-api:1.2.0
+    container_name: compreface-api
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_URL=jdbc:postgresql://compreface-postgres-db:5432/compreface
+      - CONNECTION_TIMEOUT=10000
+      - READ_TIMEOUT=60000
+      - MAX_FILE_SIZE=50MB
+    depends_on:
+      compreface-postgres-db:
+        condition: service_healthy
+      compreface-core:
+        condition: service_started
+    networks:
+      - lookout-network
+
+  # -------------------------------------------------------------
+  # Exadel CompreFace: Deep Neural Network ML Inference Core
+  # -------------------------------------------------------------
+  compreface-core:
+    image: exadel/compreface-core:1.2.0
+    container_name: compreface-core
+    restart: unless-stopped
+    environment:
+      - ML_SERVICE_PORT=3000
+      - GPU_IDX=-1
+      - SAVE_LOGS_TO_FILE=false
+    networks:
+      - lookout-network
+
+  # -------------------------------------------------------------
+  # Persistent PostgreSQL Database (CompreFace + Lookout DB)
+  # -------------------------------------------------------------
+  compreface-postgres-db:
+    image: postgres:15-alpine
+    container_name: compreface-postgres-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=compreface
+      - POSTGRES_MULTIPLE_DATABASES=lookout_db
+    volumes:
+      # Persistent storage for facial embeddings, collections, and Lookout history metadata
+      - compreface-postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d compreface"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lookout-network
+
+networks:
+  lookout-network:
+    driver: bridge
+
+volumes:
+  compreface-postgres-data:
+    driver: local
+  lookout-data:
+    driver: local
